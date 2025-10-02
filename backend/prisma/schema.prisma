@@ -1,0 +1,292 @@
+// MDM (Mobile Device Management) Database Schema
+// This schema defines the core entities for managing mobile devices
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// User Management
+model User {
+  id          Int      @id @default(autoincrement())
+  email       String   @unique
+  password    String   // Hashed password
+  name        String
+  role        Role     @default(USER)
+  department  String?
+  isActive    Boolean  @default(true)
+  lastLogin   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  devices     Device[]
+  commands    Command[]
+  createdPolicies Policy[] @relation("PolicyCreator")
+
+  @@map("users")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  USER
+}
+
+// Device Management
+model Device {
+  id          Int      @id @default(autoincrement())
+  name        String
+  model       String
+  brand       String?
+  osVersion   String
+  status      DeviceStatus @default(OFFLINE)
+  battery     Int?
+  location    String?
+  imei        String   @unique
+  phoneNumber String?
+  macAddress  String?
+  serialNumber String?
+  lastSeen    DateTime?
+  isEnrolled  Boolean  @default(false)
+  enrollmentDate DateTime?
+  
+  // Headwind MDM specific fields
+  deviceId    String?  // Headwind device identifier
+  project     String?  // Headwind project name
+  cpu         String?  // CPU architecture
+  iccid       String?  // SIM card ICCID
+  imsi        String?  // SIM card IMSI
+  phone2      String?  // Secondary phone number
+  imei2       String?  // Secondary IMEI
+  iccid2      String?  // Secondary ICCID
+  imsi2       String?  // Secondary IMSI
+  mdmMode     Boolean  @default(false)
+  kioskMode   Boolean  @default(false)
+  launcherType String?
+  launcherPackage String?
+  defaultLauncher Boolean @default(false)
+  custom1     String?
+  custom2     String?
+  custom3     String?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  userId      Int
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  commands    Command[]
+  applications DeviceApplication[]
+  policies    DevicePolicy[]
+  events      DeviceEvent[]
+
+  @@map("devices")
+}
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+  WARNING
+  LOCKED
+  WIPED
+  LOST
+}
+
+// Command Management
+model Command {
+  id          Int      @id @default(autoincrement())
+  action      CommandType
+  status      CommandStatus @default(PENDING)
+  description String?
+  parameters  String?  // JSON string for command parameters
+  result      String?  // Command execution result
+  errorMessage String?
+  createdAt   DateTime @default(now())
+  executedAt  DateTime?
+  completedAt DateTime?
+
+  // Relations
+  deviceId    Int
+  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  createdById Int
+  createdBy   User     @relation(fields: [createdById], references: [id])
+
+  @@map("commands")
+}
+
+enum CommandType {
+  LOCK
+  UNLOCK
+  WIPE
+  LOCATE
+  RESTART
+  SECURITY_SCAN
+  BACKUP
+  INSTALL_APP
+  UNINSTALL_APP
+  ALARM
+  SET_POLICY
+}
+
+enum CommandStatus {
+  PENDING
+  EXECUTING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// Application Management
+model Application {
+  id          Int      @id @default(autoincrement())
+  name        String
+  packageName String   @unique
+  version     String?
+  versionCode Int?
+  category    String?
+  description String?
+  iconUrl     String?
+  downloadUrl String?
+  isSystemApp Boolean  @default(false)
+  isRequired  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  devices     DeviceApplication[]
+  policies    PolicyApplication[]
+
+  @@map("applications")
+}
+
+model DeviceApplication {
+  id          Int      @id @default(autoincrement())
+  isInstalled Boolean  @default(false)
+  version     String?
+  installedAt DateTime? 
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  deviceId    Int
+  device      Device      @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  applicationId Int
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, applicationId])
+  @@map("device_applications")
+}
+
+// Policy Management
+model Policy {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  rules       String   // JSON string containing policy rules
+  isActive    Boolean  @default(true)
+  priority    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  createdById Int
+  createdBy   User      @relation("PolicyCreator", fields: [createdById], references: [id])
+  devices     DevicePolicy[]
+  applications PolicyApplication[]
+
+  @@map("policies")
+}
+
+model DevicePolicy {
+  id        Int      @id @default(autoincrement())
+  isActive  Boolean  @default(true)
+  appliedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  // Relations
+  deviceId  Int
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  policyId  Int
+  policy    Policy   @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, policyId])
+  @@map("device_policies")
+}
+
+model PolicyApplication {
+  id        Int      @id @default(autoincrement())
+  action    PolicyAction // ALLOW, BLOCK, REQUIRE
+  createdAt DateTime @default(now())
+
+  // Relations
+  policyId      Int
+  policy        Policy      @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  applicationId Int
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, applicationId])
+  @@map("policy_applications")
+}
+
+enum PolicyAction {
+  ALLOW
+  BLOCK
+  REQUIRE
+}
+
+// Event/Activity Logging
+model DeviceEvent {
+  id          Int       @id @default(autoincrement())
+  eventType   EventType
+  title       String
+  description String?
+  metadata    String?   // JSON string for additional data
+  severity    EventSeverity @default(INFO)
+  timestamp   DateTime  @default(now())
+
+  // Relations
+  deviceId    Int
+  device      Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@map("device_events")
+}
+
+enum EventType {
+  STATUS_CHANGE
+  LOCATION_UPDATE
+  BATTERY_LOW
+  SECURITY_ALERT
+  APP_INSTALLED
+  APP_UNINSTALLED
+  POLICY_APPLIED
+  COMMAND_EXECUTED
+  LOGIN_ATTEMPT
+  DEVICE_ENROLLED
+  DEVICE_UNENROLLED
+}
+
+enum EventSeverity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+// Configuration & Settings
+model SystemSetting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     String
+  category  String?
+  description String?
+  isPublic  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
+}
